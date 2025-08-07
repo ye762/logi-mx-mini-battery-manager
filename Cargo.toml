@@ -1,0 +1,16 @@
+// Cargo.toml
+[package]
+name = "mx-mini-battery-manager"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.10"
+clap = { version = "4.0", features = ["derive"] }
+systemd-journal-logger = "0.5"
+hidapi = "2.4"
