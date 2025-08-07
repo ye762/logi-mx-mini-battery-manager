@@ -13,3 +13,9 @@ env_logger = "0.10"
 clap = { version = "4.0", features = ["derive"] }
 systemd-journal-logger = "0.5"
 hidapi = "2.4"
+
+#[profile.release]
+#lto = true           # Link-time optimization
+#codegen-units = 1    # Better optimization
+#panic = "abort"      # Smaller binary size
+#strip = true         # Remove debug symbols
