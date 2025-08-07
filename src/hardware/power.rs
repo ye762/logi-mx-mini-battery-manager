@@ -2,9 +2,9 @@ use anyhow::{Context, Result};
 use std::fs;
 use log::{debug, warn};
 
-pub struct PowerController;
+pub struct PowerManager;
 
-impl PowerController {
+impl PowerManager {
     pub fn new() -> Self {
         Self
     }

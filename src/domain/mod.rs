@@ -1,2 +1,2 @@
-mod manager;
-pub use manager::BatteryManager;
+mod service;
+pub use service::BatteryManager;

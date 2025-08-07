@@ -2,19 +2,25 @@ use anyhow::{Context, Result};
 use hidapi::{HidApi, HidDevice};
 use log::{debug, warn};
 
-pub struct HIDCommunicator {
+pub struct LogitechManager {
     api: HidApi,
+    hid_device: Option<HidDevice>
 }
 
-impl HIDCommunicator {
+impl LogitechManager {
     pub fn new() -> Result<Self> {
         let api = HidApi::new()
             .context("Failed to initialize HID API")?;
-        
-        Ok(Self { api })
+
+        Ok(Self { api, hid_device: None })
     }
-    
-    pub fn get_battery_level(&self, vendor_id: u16, product_id: u16) -> Result<Option<u8>> {
+
+    pub fn select_hid_device(name_selector: &String) -> Result<HidDevice, String> {
+        Err("No device selected".to_string())
+    }
+
+
+pub fn get_battery_level(&self, vendor_id: u16, product_id: u16) -> Result<Option<u8>> {
         let device_info = self.api
             .device_list()
             .find(|dev| dev.vendor_id() == vendor_id && dev.product_id() == product_id);

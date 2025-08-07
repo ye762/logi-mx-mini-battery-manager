@@ -12,6 +12,7 @@ mod logging;
 use config::Config;
 use domain::BatteryManager;
 use logging::setup_logging;
+use crate::hardware::LogitechManager;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -20,7 +21,7 @@ async fn main() -> Result<()> {
     let config = Config::load()?;
     info!("Starting MX Mini Battery Manager");
     
-    let mut battery_manager = BatteryManager::new(config)?;
+    /*let mut battery_manager = BatteryManager::new(config)?;
     
     loop {
         match battery_manager.check_and_manage().await {
@@ -30,6 +31,7 @@ async fn main() -> Result<()> {
         
         //sleep(Duration::from_secs(60)).await;
         sleep(Duration::from_secs(10)).await;
-    }
+    }*/
+    test_solaar_adapter
 }
 

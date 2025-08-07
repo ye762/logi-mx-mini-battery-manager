@@ -4,7 +4,7 @@ use std::path::Path;
 use log::debug;
 
 #[derive(Debug, Clone)]
-pub struct USBDevice {
+pub struct USBManager {
     pub bus: u8,
     pub device: u8,
     pub vendor_id: u16,
@@ -19,7 +19,7 @@ impl USBDeviceManager {
         Self
     }
 
-    pub fn find_device(&self, vendor_id: u16, product_id: u16) -> Result<Option<USBDevice>> {
+    pub fn find_device(&self, vendor_id: u16, product_id: u16) -> Result<Option<USBManager>> {
         let usb_devices_path = "/sys/bus/usb/devices";
         let entries = fs::read_dir(usb_devices_path)
             .context("Failed to read USB devices directory")?;
@@ -36,7 +36,7 @@ impl USBDeviceManager {
         Ok(None)
     }
 
-    fn check_device_by_uevent(&self, path: &Path, target_vendor: u16, target_product: u16) -> Result<Option<USBDevice>> {
+    fn check_device_by_uevent(&self, path: &Path, target_vendor: u16, target_product: u16) -> Result<Option<USBManager>> {
         let uevent_path = path.join("uevent");
 
         // Check if uevent file exists
@@ -76,7 +76,7 @@ impl USBDeviceManager {
         Ok(None)
     }
 
-    fn create_usb_device(&self, path: &Path, vendor_id: u16, product_id: u16) -> Result<Option<USBDevice>> {
+    fn create_usb_device(&self, path: &Path, vendor_id: u16, product_id: u16) -> Result<Option<USBManager>> {
         let dir_name = path.file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("");
@@ -90,7 +90,7 @@ impl USBDeviceManager {
 
         let device_num = self.get_device_number(path)?;
 
-        Ok(Some(USBDevice {
+        Ok(Some(USBManager {
             bus,
             device: device_num,
             vendor_id,

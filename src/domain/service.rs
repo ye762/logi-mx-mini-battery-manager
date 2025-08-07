@@ -6,13 +6,13 @@ use anyhow::{Context, Result};
 use log::{info, warn, error};
 
 use crate::config::Config;
-use crate::hardware::{USBDeviceManager, HIDCommunicator, PowerController};
+use crate::hardware::{USBDeviceManager, LogitechManager, PowerManager};
 
 pub struct BatteryManager {
     config: Config,
     usb_manager: USBDeviceManager,
-    hid_communicator: HIDCommunicator,
-    power_controller: PowerController,
+    logitech_manager: LogitechManager,
+    power_manager: PowerManager,
 }
 
 #[derive(Debug)]
@@ -40,14 +40,14 @@ impl std::fmt::Display for PowerEvent {
 
 impl BatteryManager {
     pub fn new(config: Config) -> Result<Self> {
-        let hid_communicator = HIDCommunicator::new()
+        let hid_communicator = LogitechManager::new()
             .context("Failed to initialize HID communicator")?;
 
         Ok(Self {
             config,
             usb_manager: USBDeviceManager::new(),
-            hid_communicator,
-            power_controller: PowerController::new(),
+            logitech_manager: hid_communicator,
+            power_manager: PowerManager::new(),
         })
     }
 
@@ -70,18 +70,18 @@ impl BatteryManager {
         Ok(())
     }
 
-    fn process_event(&self, event: PowerEvent, device: &crate::hardware::usb::USBDevice) {
+    fn process_event(&self, event: PowerEvent, device: &crate::hardware::usb::USBManager) {
         match event {
             PowerEvent::ChargingEnabling(_) => {
                 info!("Charging enabling");
-                self.power_controller.set_charging_enabled(&device.sys_path).unwrap_or({
+                self.power_manager.set_charging_enabled(&device.sys_path).unwrap_or({
                     error!("Failed to enable charging.");
                 });
                 info!("Charging enabled in device at {}", device.sys_path);
             }
             PowerEvent::ChargingDisabling(v) => {
                 info!("Charging disabling in device at {}...", device.sys_path);
-                self.power_controller.set_charging_disabled(&device.sys_path).unwrap_or({
+                self.power_manager.set_charging_disabled(&device.sys_path).unwrap_or({
                     error!("Failed to disable charging.");
                 });
                 info!("Charging disabled for device at {}", device.sys_path);
@@ -95,9 +95,9 @@ impl BatteryManager {
         }
     }
 
-    async fn resolve_next_event(&mut self, device: &crate::hardware::usb::USBDevice) -> Result<PowerEvent> {
+    async fn resolve_next_event(&mut self, device: &crate::hardware::usb::USBManager) -> Result<PowerEvent> {
 
-        let battery_level_optional= self.hid_communicator.get_battery_level(
+        let battery_level_optional= self.logitech_manager.get_battery_level(
             device.vendor_id, device.product_id
         )?;
 
