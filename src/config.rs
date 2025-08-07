@@ -33,7 +33,7 @@ impl Default for Config {
         Self {
             device: DeviceConfig {
                 vendor_id: 0x046d, // Logitech
-                product_id: 0xb023, // MX Mini (example ID)
+                product_id: 0xc328, // MX Mini
                 name: "Logitech MX Mini".to_string(),
             },
             thresholds: ThresholdConfig {
