@@ -6,11 +6,11 @@ use tokio::time::sleep;
 
 mod config;
 mod hardware;
-mod business;
+mod domain;
 mod logging;
 
 use config::Config;
-use business::BatteryManager;
+use domain::BatteryManager;
 use logging::setup_logging;
 
 #[tokio::main]
@@ -28,7 +28,8 @@ async fn main() -> Result<()> {
             Err(e) => error!("Error during battery check: {}", e),
         }
         
-        sleep(Duration::from_secs(60)).await;
+        //sleep(Duration::from_secs(60)).await;
+        sleep(Duration::from_secs(10)).await;
     }
 }
 

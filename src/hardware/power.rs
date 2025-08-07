@@ -9,15 +9,16 @@ impl PowerController {
         Self
     }
     
-    pub fn set_charging_enabled(&self, sys_path: &str, enabled: bool) -> Result<()> {
+    pub fn set_charging_enabled(&self, sys_path: &str) -> Result<()> {
         let autosuspend_path = format!("{}/power/autosuspend", sys_path);
         let control_path = format!("{}/power/control", sys_path);
-        
-        if enabled {
-            self.enable_charging(&autosuspend_path, &control_path)
-        } else {
-            self.disable_charging(&autosuspend_path, &control_path)
-        }
+        self.enable_charging(&autosuspend_path, &control_path)
+    }
+
+    pub fn set_charging_disabled(&self, sys_path: &str) -> Result<()> {
+        let autosuspend_path = format!("{}/power/autosuspend", sys_path);
+        let control_path = format!("{}/power/control", sys_path);
+        self.disable_charging(&autosuspend_path, &control_path)
     }
     
     fn enable_charging(&self, autosuspend_path: &str, control_path: &str) -> Result<()> {
