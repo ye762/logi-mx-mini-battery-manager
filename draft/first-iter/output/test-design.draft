@@ -1,0 +1,58 @@
+# Test Design for Logitech MX Mini Battery Manager
+
+## Test Scenarios
+
+### Scenario 1: Device connected via USB with high battery
+**Given:**
+- `{device_connected_usb: true}`
+- `{battery_level: 85}`
+- `{charging_enabled: true}`
+
+**When:** Battery check is performed
+
+**Then:**
+- `{charging_enabled: false}`
+- `{log_entry: "is_connected_via_usb=true, battery_level=85, action_done=charging_disabled"}`
+
+### Scenario 2: Device connected via USB with low battery
+**Given:**
+- `{device_connected_usb: true}`
+- `{battery_level: 75}`
+- `{charging_enabled: false}`
+
+**When:** Battery check is performed
+
+**Then:**
+- `{charging_enabled: true}`
+- `{log_entry: "is_connected_via_usb=true, battery_level=75, action_done=charging_enabled"}`
+
+### Scenario 3: Device connected via USB with battery at threshold
+**Given:**
+- `{device_connected_usb: true}`
+- `{battery_level: 80}`
+- `{charging_enabled: true}`
+
+**When:** Battery check is performed
+
+**Then:**
+- `{charging_enabled: true}` (no change)
+- `{log_entry: "is_connected_via_usb=true, battery_level=80, action_done=no_change"}`
+
+### Scenario 4: Device not connected via USB
+**Given:**
+- `{device_connected_usb: false}`
+
+**When:** Device check is performed
+
+**Then:**
+- `{log_entry: "device not found via USB, vendor_id=0x046d, device_id=0xb023"}`
+
+### Scenario 5: Device connected but battery info unavailable
+**Given:**
+- `{device_connected_usb: true}`
+- `{battery_level: null}`
+
+**When:** Battery check is performed
+
+**Then:**
+- `{log_entry: "is_connected_via_usb=true, battery_level=unknown, action_done=error"}`

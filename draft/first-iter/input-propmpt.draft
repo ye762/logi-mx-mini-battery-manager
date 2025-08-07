@@ -1,0 +1,21 @@
+so lets write small application in rust:
+context: here is keyboard logitech mx mini, which transmits data through bluetooth (data: battery percentage and etc) and connected through usb in order to charge. we want to reduce wear of battery to extend device lifecycle.
+main business logic:
+1. when device connected via usb(read usb device list, find by vendor_id and device_id)
+   1. check battery level 
+      1. greater than 80% -> disable usb charging of this device programmatically
+      2. less than 80% -> enable charging via usb programmatically
+   2. log that check was proceed in format: {is_connected_via_usb, battery_level, action_done(e.g. charging_enabled, charging_disabled)}
+2. when no device by vendor_id and device_id: log it
+when to run: once per minute
+how to integrate: systemd daemon
+system specs:  Linux 6.15.*.x86_64
+logs: to journal with appropriate tag like {app_name}
+Steps to implement:
+1. lets do test design in terms (given [{property:value}] when {some-action} then [{assert property from given changed to <expected_value>} ]]
+2. design in words layers of abstraction
+   1. hardware layer(linux sys calls)
+   2. business abstraction (where main logic stores)
+   3. configuration layer (where properties such thresholds etc)
+   4. integration layer (systemd service config + cron which runs this app once per minute)
+3. implement  ( generate source code)

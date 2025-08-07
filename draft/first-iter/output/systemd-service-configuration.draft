@@ -1,0 +1,128 @@
+# /etc/systemd/system/mx-mini-battery-manager.service
+[Unit]
+Description=Logitech MX Mini Battery Manager
+Documentation=https://github.com/yourusername/mx-mini-battery-manager
+After=multi-user.target
+Wants=mx-mini-battery-manager.timer
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/mx-mini-battery-manager
+Restart=on-failure
+RestartSec=10
+User=root
+Group=root
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/sys/bus/usb/devices
+PrivateTmp=true
+ProtectKernelTunables=false
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+# Capabilities needed for USB device access
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_OVERRIDE
+AmbientCapabilities=CAP_SYS_ADMIN CAP_DAC_OVERRIDE
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mx-mini-battery-manager
+
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/mx-mini-battery-manager.timer
+[Unit]
+Description=Run MX Mini Battery Manager every minute
+Requires=mx-mini-battery-manager.service
+
+[Timer]
+OnCalendar=*:*:00
+Persistent=true
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target
+
+# Installation script (install.sh)
+#!/bin/bash
+set -e
+
+echo "Installing MX Mini Battery Manager..."
+
+# Build the application
+cargo build --release
+
+# Copy binary
+sudo cp target/release/mx-mini-battery-manager /usr/local/bin/
+sudo chmod +x /usr/local/bin/mx-mini-battery-manager
+
+# Create config directory
+sudo mkdir -p /etc/mx-mini-battery-manager
+
+# Copy default config if it doesn't exist
+if [ ! -f /etc/mx-mini-battery-manager/config.json ]; then
+    cat > /tmp/mx-mini-config.json << EOF
+{
+  "device": {
+    "vendor_id": 1133,
+    "product_id": 45091,
+    "name": "Logitech MX Mini"
+  },
+  "thresholds": {
+    "high_threshold": 80,
+    "low_threshold": 20
+  },
+  "logging": {
+    "level": "info",
+    "use_journal": true
+  }
+}
+EOF
+    sudo mv /tmp/mx-mini-config.json /etc/mx-mini-battery-manager/config.json
+fi
+
+# Install systemd service
+sudo cp mx-mini-battery-manager.service /etc/systemd/system/
+sudo cp mx-mini-battery-manager.timer /etc/systemd/system/
+
+# Reload systemd and enable services
+sudo systemctl daemon-reload
+sudo systemctl enable mx-mini-battery-manager.service
+sudo systemctl enable mx-mini-battery-manager.timer
+sudo systemctl start mx-mini-battery-manager.timer
+
+echo "Installation complete!"
+echo "Check status with: sudo systemctl status mx-mini-battery-manager.timer"
+echo "View logs with: journalctl -u mx-mini-battery-manager -f"
+
+# Uninstall script (uninstall.sh)
+#!/bin/bash
+set -e
+
+echo "Uninstalling MX Mini Battery Manager..."
+
+# Stop and disable services
+sudo systemctl stop mx-mini-battery-manager.timer || true
+sudo systemctl disable mx-mini-battery-manager.timer || true
+sudo systemctl stop mx-mini-battery-manager.service || true
+sudo systemctl disable mx-mini-battery-manager.service || true
+
+# Remove systemd files
+sudo rm -f /etc/systemd/system/mx-mini-battery-manager.service
+sudo rm -f /etc/systemd/system/mx-mini-battery-manager.timer
+
+# Remove binary
+sudo rm -f /usr/local/bin/mx-mini-battery-manager
+
+# Reload systemd
+sudo systemctl daemon-reload
+
+echo "Uninstallation complete!"
+echo "Configuration files remain in /etc/mx-mini-battery-manager/"

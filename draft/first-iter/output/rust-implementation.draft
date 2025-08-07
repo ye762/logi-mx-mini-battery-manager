@@ -1,0 +1,498 @@
+// Cargo.toml
+[package]
+name = "mx-mini-battery-manager"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.10"
+clap = { version = "4.0", features = ["derive"] }
+systemd-journal-logger = "0.5"
+hidapi = "2.4"
+
+// src/main.rs
+use anyhow::{Context, Result};
+use log::{error, info, warn};
+use std::time::Duration;
+use tokio::time::sleep;
+
+mod config;
+mod hardware;
+mod business;
+mod logging;
+
+use config::Config;
+use business::BatteryManager;
+use logging::setup_logging;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    setup_logging()?;
+    
+    let config = Config::load()?;
+    info!("Starting MX Mini Battery Manager");
+    
+    let mut battery_manager = BatteryManager::new(config)?;
+    
+    loop {
+        match battery_manager.check_and_manage().await {
+            Ok(_) => {},
+            Err(e) => error!("Error during battery check: {}", e),
+        }
+        
+        sleep(Duration::from_secs(60)).await;
+    }
+}
+
+// src/config.rs
+use serde::{Deserialize, Serialize};
+use std::fs;
+use anyhow::{Context, Result};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Config {
+    pub device: DeviceConfig,
+    pub thresholds: ThresholdConfig,
+    pub logging: LoggingConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceConfig {
+    pub vendor_id: u16,
+    pub product_id: u16,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThresholdConfig {
+    pub high_threshold: u8,
+    pub low_threshold: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoggingConfig {
+    pub level: String,
+    pub use_journal: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            device: DeviceConfig {
+                vendor_id: 0x046d, // Logitech
+                product_id: 0xb023, // MX Mini (example ID)
+                name: "Logitech MX Mini".to_string(),
+            },
+            thresholds: ThresholdConfig {
+                high_threshold: 80,
+                low_threshold: 20,
+            },
+            logging: LoggingConfig {
+                level: "info".to_string(),
+                use_journal: true,
+            },
+        }
+    }
+}
+
+impl Config {
+    pub fn load() -> Result<Self> {
+        let config_path = "/etc/mx-mini-battery-manager/config.json";
+        
+        match fs::read_to_string(config_path) {
+            Ok(content) => {
+                serde_json::from_str(&content)
+                    .context("Failed to parse configuration file")
+            }
+            Err(_) => {
+                log::info!("Config file not found, using defaults");
+                Ok(Self::default())
+            }
+        }
+    }
+}
+
+// src/hardware/mod.rs
+pub mod usb;
+pub mod hid;
+pub mod power;
+
+pub use usb::USBDeviceManager;
+pub use hid::HIDCommunicator;
+pub use power::PowerController;
+
+// src/hardware/usb.rs
+use anyhow::{Context, Result};
+use std::fs;
+use std::path::Path;
+
+#[derive(Debug, Clone)]
+pub struct USBDevice {
+    pub bus: u8,
+    pub device: u8,
+    pub vendor_id: u16,
+    pub product_id: u16,
+    pub sys_path: String,
+}
+
+pub struct USBDeviceManager;
+
+impl USBDeviceManager {
+    pub fn new() -> Self {
+        Self
+    }
+    
+    pub fn find_device(&self, vendor_id: u16, product_id: u16) -> Result<Option<USBDevice>> {
+        let usb_devices_path = "/sys/bus/usb/devices";
+        let entries = fs::read_dir(usb_devices_path)
+            .context("Failed to read USB devices directory")?;
+        
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+            
+            if let Some(device) = self.parse_usb_device(&path, vendor_id, product_id)? {
+                return Ok(Some(device));
+            }
+        }
+        
+        Ok(None)
+    }
+    
+    fn parse_usb_device(&self, path: &Path, target_vendor: u16, target_product: u16) -> Result<Option<USBDevice>> {
+        // Skip root hubs and other non-device entries
+        let dir_name = path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        
+        if !dir_name.contains(':') {
+            return Ok(None);
+        }
+        
+        let vendor_path = path.join("idVendor");
+        let product_path = path.join("idProduct");
+        
+        if !vendor_path.exists() || !product_path.exists() {
+            return Ok(None);
+        }
+        
+        let vendor_str = fs::read_to_string(&vendor_path)
+            .context("Failed to read vendor ID")?;
+        let product_str = fs::read_to_string(&product_path)
+            .context("Failed to read product ID")?;
+        
+        let vendor_id = u16::from_str_radix(vendor_str.trim(), 16)
+            .context("Failed to parse vendor ID")?;
+        let product_id = u16::from_str_radix(product_str.trim(), 16)
+            .context("Failed to parse product ID")?;
+        
+        if vendor_id == target_vendor && product_id == target_product {
+            // Parse bus and device numbers from directory name
+            let parts: Vec<&str> = dir_name.split(['-', ':']).collect();
+            if parts.len() >= 2 {
+                let bus = parts[0].parse().unwrap_or(0);
+                let device_num = self.get_device_number(path)?;
+                
+                return Ok(Some(USBDevice {
+                    bus,
+                    device: device_num,
+                    vendor_id,
+                    product_id,
+                    sys_path: path.to_string_lossy().to_string(),
+                }));
+            }
+        }
+        
+        Ok(None)
+    }
+    
+    fn get_device_number(&self, path: &Path) -> Result<u8> {
+        let devnum_path = path.join("devnum");
+        if devnum_path.exists() {
+            let devnum_str = fs::read_to_string(&devnum_path)
+                .context("Failed to read device number")?;
+            devnum_str.trim().parse()
+                .context("Failed to parse device number")
+        } else {
+            Ok(0)
+        }
+    }
+}
+
+// src/hardware/hid.rs
+use anyhow::{Context, Result};
+use hidapi::{HidApi, HidDevice};
+use log::{debug, warn};
+
+pub struct HIDCommunicator {
+    api: HidApi,
+}
+
+impl HIDCommunicator {
+    pub fn new() -> Result<Self> {
+        let api = HidApi::new()
+            .context("Failed to initialize HID API")?;
+        
+        Ok(Self { api })
+    }
+    
+    pub fn get_battery_level(&self, vendor_id: u16, product_id: u16) -> Result<Option<u8>> {
+        let device_info = self.api
+            .device_list()
+            .find(|dev| dev.vendor_id() == vendor_id && dev.product_id() == product_id);
+        
+        if let Some(info) = device_info {
+            let device = info.open_device(&self.api)
+                .context("Failed to open HID device")?;
+            
+            self.read_battery_from_device(&device)
+        } else {
+            debug!("HID device not found: {:04x}:{:04x}", vendor_id, product_id);
+            Ok(None)
+        }
+    }
+    
+    fn read_battery_from_device(&self, device: &HidDevice) -> Result<Option<u8>> {
+        // Logitech HID++ protocol for battery status
+        // This is a simplified implementation - actual protocol may vary
+        let mut buf = [0u8; 20];
+        
+        // HID++ short message: device_index=0xFF, feature_index=0x00, function=0x00
+        // This requests basic device information
+        buf[0] = 0x10; // Report ID for HID++
+        buf[1] = 0xFF; // Device index (unifying receiver)
+        buf[2] = 0x00; // Feature index
+        buf[3] = 0x00; // Function
+        
+        match device.write(&buf[..4]) {
+            Ok(_) => {
+                // Read response
+                match device.read_timeout(&mut buf, 1000) {
+                    Ok(bytes_read) if bytes_read > 0 => {
+                        // Parse battery level from response
+                        // This is device-specific and may need adjustment
+                        if buf[0] == 0x10 && bytes_read >= 7 {
+                            let battery_level = buf[6]; // Battery percentage
+                            debug!("Battery level read: {}%", battery_level);
+                            Ok(Some(battery_level))
+                        } else {
+                            warn!("Unexpected HID response format");
+                            Ok(None)
+                        }
+                    }
+                    Ok(_) => {
+                        warn!("Empty HID response");
+                        Ok(None)
+                    }
+                    Err(e) => {
+                        warn!("Failed to read from HID device: {}", e);
+                        Ok(None)
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to write to HID device: {}", e);
+                Ok(None)
+            }
+        }
+    }
+}
+
+// src/hardware/power.rs
+use anyhow::{Context, Result};
+use std::fs;
+use log::{debug, warn};
+
+pub struct PowerController;
+
+impl PowerController {
+    pub fn new() -> Self {
+        Self
+    }
+    
+    pub fn set_charging_enabled(&self, sys_path: &str, enabled: bool) -> Result<()> {
+        let autosuspend_path = format!("{}/power/autosuspend", sys_path);
+        let control_path = format!("{}/power/control", sys_path);
+        
+        if enabled {
+            self.enable_charging(&autosuspend_path, &control_path)
+        } else {
+            self.disable_charging(&autosuspend_path, &control_path)
+        }
+    }
+    
+    fn enable_charging(&self, autosuspend_path: &str, control_path: &str) -> Result<()> {
+        // Enable autosuspend and set control to auto for normal charging
+        if let Err(e) = fs::write(autosuspend_path, "2") {
+            warn!("Failed to write autosuspend: {}", e);
+        }
+        
+        fs::write(control_path, "auto")
+            .context("Failed to enable charging")?;
+        
+        debug!("Charging enabled");
+        Ok(())
+    }
+    
+    fn disable_charging(&self, autosuspend_path: &str, control_path: &str) -> Result<()> {
+        // Disable autosuspend by setting control to suspend
+        // This prevents the device from drawing charging current
+        fs::write(control_path, "suspend")
+            .context("Failed to disable charging")?;
+        
+        debug!("Charging disabled");
+        Ok(())
+    }
+    
+    pub fn is_charging_enabled(&self, sys_path: &str) -> Result<bool> {
+        let control_path = format!("{}/power/control", sys_path);
+        
+        match fs::read_to_string(&control_path) {
+            Ok(content) => Ok(content.trim() == "auto"),
+            Err(e) => {
+                warn!("Failed to read charging state: {}", e);
+                Ok(true) // Default to enabled for safety
+            }
+        }
+    }
+}
+
+// src/business/mod.rs
+pub mod manager;
+
+pub use manager::BatteryManager;
+
+// src/business/manager.rs
+use anyhow::{Context, Result};
+use log::{info, warn, error};
+
+use crate::config::Config;
+use crate::hardware::{USBDeviceManager, HIDCommunicator, PowerController};
+
+pub struct BatteryManager {
+    config: Config,
+    usb_manager: USBDeviceManager,
+    hid_communicator: HIDCommunicator,
+    power_controller: PowerController,
+}
+
+#[derive(Debug)]
+pub enum Action {
+    ChargingEnabled,
+    ChargingDisabled,
+    NoChange,
+    Error,
+}
+
+impl std::fmt::Display for Action {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Action::ChargingEnabled => write!(f, "charging_enabled"),
+            Action::ChargingDisabled => write!(f, "charging_disabled"),
+            Action::NoChange => write!(f, "no_change"),
+            Action::Error => write!(f, "error"),
+        }
+    }
+}
+
+impl BatteryManager {
+    pub fn new(config: Config) -> Result<Self> {
+        let hid_communicator = HIDCommunicator::new()
+            .context("Failed to initialize HID communicator")?;
+        
+        Ok(Self {
+            config,
+            usb_manager: USBDeviceManager::new(),
+            hid_communicator,
+            power_controller: PowerController::new(),
+        })
+    }
+    
+    pub async fn check_and_manage(&mut self) -> Result<()> {
+        let device_config = &self.config.device;
+        
+        match self.usb_manager.find_device(device_config.vendor_id, device_config.product_id)? {
+            Some(usb_device) => {
+                info!("Device found: {} at {}", device_config.name, usb_device.sys_path);
+                self.manage_device_battery(&usb_device).await?;
+            }
+            None => {
+                info!("Device not found via USB: vendor_id=0x{:04x}, product_id=0x{:04x}", 
+                     device_config.vendor_id, device_config.product_id);
+            }
+        }
+        
+        Ok(())
+    }
+    
+    async fn manage_device_battery(&mut self, device: &crate::hardware::usb::USBDevice) -> Result<()> {
+        let battery_level = self.hid_communicator
+            .get_battery_level(device.vendor_id, device.product_id)?;
+        
+        let action = match battery_level {
+            Some(level) => {
+                let is_charging_enabled = self.power_controller
+                    .is_charging_enabled(&device.sys_path)?;
+                
+                let should_charge = level < self.config.thresholds.high_threshold;
+                
+                let action = if should_charge && !is_charging_enabled {
+                    match self.power_controller.set_charging_enabled(&device.sys_path, true) {
+                        Ok(()) => Action::ChargingEnabled,
+                        Err(e) => {
+                            error!("Failed to enable charging: {}", e);
+                            Action::Error
+                        }
+                    }
+                } else if !should_charge && is_charging_enabled {
+                    match self.power_controller.set_charging_enabled(&device.sys_path, false) {
+                        Ok(()) => Action::ChargingDisabled,
+                        Err(e) => {
+                            error!("Failed to disable charging: {}", e);
+                            Action::Error
+                        }
+                    }
+                } else {
+                    Action::NoChange
+                };
+                
+                info!("is_connected_via_usb=true, battery_level={}%, action_done={}", 
+                     level, action);
+                
+                action
+            }
+            None => {
+                warn!("is_connected_via_usb=true, battery_level=unknown, action_done=error");
+                Action::Error
+            }
+        };
+        
+        Ok(())
+    }
+}
+
+// src/logging/mod.rs
+use anyhow::Result;
+use log::LevelFilter;
+
+pub fn setup_logging() -> Result<()> {
+    if std::env::var("JOURNAL_STREAM").is_ok() {
+        // Running under systemd, use journal logger
+        systemd_journal_logger::JournalLog::new()?
+            .with_extra_fields(vec![("VERSION", env!("CARGO_PKG_VERSION"))])
+            .with_syslog_identifier("mx-mini-battery-manager".to_string())
+            .install()?;
+    } else {
+        // Development mode, use env_logger
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+            .init();
+    }
+    
+    log::set_max_level(LevelFilter::Info);
+    Ok(())
+}

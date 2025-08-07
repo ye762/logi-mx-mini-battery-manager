@@ -1,0 +1,73 @@
+# Architecture Design - Battery Manager Layers
+
+## Layer 1: Hardware Abstraction Layer (HAL)
+**Purpose:** Interface with Linux system calls and hardware APIs
+**Responsibilities:**
+- USB device enumeration via `/sys/bus/usb/devices/`
+- HID device communication for battery status via `/dev/hidraw*`
+- USB power control via `/sys/bus/usb/devices/*/power/autosuspend` and related sysfs entries
+- Device identification by vendor_id (0x046d) and product_id (varies by model)
+
+**Components:**
+- `USBDeviceManager`: Enumerate and identify USB devices
+- `HIDCommunicator`: Communicate with HID devices for battery info
+- `PowerController`: Enable/disable USB charging via sysfs
+- `DeviceIdentifier`: Match devices by vendor/product ID
+
+## Layer 2: Business Logic Layer
+**Purpose:** Core application logic and decision making
+**Responsibilities:**
+- Battery level evaluation against thresholds
+- Charging state management decisions
+- State transitions and business rules
+- Action logging and audit trail
+
+**Components:**
+- `BatteryManager`: Main orchestrator for battery management logic
+- `ChargingController`: Decision engine for enable/disable charging
+- `StateTracker`: Track device and charging states
+- `ActionLogger`: Format and emit structured logs
+
+## Layer 3: Configuration Layer  
+**Purpose:** Application configuration and settings management
+**Responsibilities:**
+- Threshold configuration (default: 80%)
+- Device identification parameters
+- Logging configuration
+- Runtime parameter management
+
+**Components:**
+- `Config`: Configuration structure and validation
+- `DeviceConfig`: Device-specific parameters (vendor_id, product_id)
+- `ThresholdConfig`: Battery thresholds and hysteresis
+- `LoggingConfig`: Log levels and formatting
+
+## Layer 4: Integration Layer
+**Purpose:** System integration and service management  
+**Responsibilities:**
+- Systemd service configuration
+- Timer-based execution (1-minute intervals)
+- Journal logging integration
+- Error handling and recovery
+- Privilege management for hardware access
+
+**Components:**
+- `ServiceRunner`: Main application entry point
+- `SystemdIntegration`: Service lifecycle management  
+- `JournalLogger`: systemd journal integration
+- `PrivilegeManager`: Handle required permissions
+
+## Data Flow
+```
+Timer (systemd) → ServiceRunner → BatteryManager → USBDeviceManager
+                                                 ↓
+JournalLogger ← ActionLogger ← ChargingController ← HIDCommunicator
+                                                 ↓
+                                              PowerController
+```
+
+## Error Handling Strategy
+- Graceful degradation when hardware access fails
+- Retry logic for transient failures
+- Comprehensive logging for debugging
+- Fail-safe defaults (don't disable charging on errors)
